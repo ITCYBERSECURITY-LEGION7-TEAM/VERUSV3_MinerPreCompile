@@ -1,0 +1,597 @@
+#!/bin/bash
+
+# Mining Monitor dan Auto Miner untuk Vipor dan LuckPool
+# Author: Assistant
+# Version: 3.0
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Configuration
+CONFIG_FILE="$HOME/.mining_monitor.conf"
+CCMINER_CONFIG="$HOME/ccminer_config.json"
+MINING_SCRIPT="$HOME/start_mining.sh"
+
+# Mining Pools Configuration
+declare -A VIPOR_POOLS=(
+    ["US-East"]="stratum.vipor.net:3000"
+    ["US-West"]="stratum.vipor.net:3001" 
+    ["Europe"]="stratum.vipor.net:3002"
+    ["Asia"]="stratum.vipor.net:3003"
+    ["Australia"]="stratum.vipor.net:3004"
+    ["Canada"]="stratum.vipor.net:3005"
+    ["Germany"]="stratum.vipor.net:3006"
+    ["France"]="stratum.vipor.net:3007"
+    ["UK"]="stratum.vipor.net:3008"
+    ["Brazil"]="stratum.vipor.net:3009"
+)
+
+declare -A LUCKPOOL_POOLS=(
+    ["US-East"]="na.luckpool.net:3956"
+    ["US-West"]="us.luckpool.net:3956"
+    ["Europe"] "eu.luckpool.net:3956"
+    ["Asia"]="asia.luckpool.net:3956"
+    ["Australia"]="au.luckpool.net:3956"
+    ["Canada"]="ca.luckpool.net:3956"
+    ["Germany"]="de.luckpool.net:3956"
+    ["France"]="fr.luckpool.net:3956"
+    ["UK"]="uk.luckpool.net:3956"
+    ["Brazil"]="br.luckpool.net:3956"
+)
+
+# Wallet addresses
+VIPOR_WALLET=""
+LUCKPOOL_WALLET=""
+SELECTED_POOL=""
+SELECTED_ALGO="verus"
+CPU_THREADS=$(nproc)
+
+# Load configuration
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        echo -e "${GREEN}Konfigurasi loaded dari $CONFIG_FILE${NC}"
+    else
+        echo -e "${YELLOW}File konfigurasi tidak ditemukan. Silakan setup wallet terlebih dahulu.${NC}"
+    fi
+}
+
+# Save configuration
+save_config() {
+    cat > "$CONFIG_FILE" << EOF
+VIPOR_WALLET="$VIPOR_WALLET"
+LUCKPOOL_WALLET="$LUCKPOOL_WALLET"
+SELECTED_POOL="$SELECTED_POOL"
+SELECTED_ALGO="$SELECTED_ALGO"
+CPU_THREADS="$CPU_THREADS"
+EOF
+    echo -e "${GREEN}Konfigurasi disimpan ke $CONFIG_FILE${NC}"
+}
+
+# Setup wallets and mining configuration
+setup_mining() {
+    echo -e "${CYAN}=== SETUP MINING CONFIGURATION ===${NC}"
+    read -p "Masukkan Vipor Wallet Address: " VIPOR_WALLET
+    read -p "Masukkan LuckPool Wallet Address: " LUCKPOOL_WALLET
+    
+    # Pool selection
+    echo -e "\n${YELLOW}Pilih Mining Pool:${NC}"
+    echo "1) Vipor Pool"
+    echo "2) LuckPool"
+    read -p "Pilih pool [1-2]: " pool_choice
+    
+    case $pool_choice in
+        1)
+            SELECTED_POOL="vipor"
+            echo -e "${GREEN}Pool Vipor dipilih${NC}"
+            ;;
+        2)
+            SELECTED_POOL="luckpool" 
+            echo -e "${GREEN}LuckPool dipilih${NC}"
+            ;;
+        *)
+            echo -e "${RED}Pilihan tidak valid, menggunakan Vipor${NC}"
+            SELECTED_POOL="vipor"
+            ;;
+    esac
+    
+    # Algorithm selection
+    echo -e "\n${YELLOW}Pilih Algorithm:${NC}"
+    echo "1) verus (VerusHash 2.1)"
+    echo "2) x16r"
+    echo "3) x16s"
+    read -p "Pilih algorithm [1-3]: " algo_choice
+    
+    case $algo_choice in
+        1) SELECTED_ALGO="verus" ;;
+        2) SELECTED_ALGO="x16r" ;;
+        3) SELECTED_ALGO="x16s" ;;
+        *) SELECTED_ALGO="verus" ;;
+    esac
+    
+    # CPU threads
+    read -p "Jumlah CPU threads untuk mining [default: $CPU_THREADS]: " input_threads
+    if [ ! -z "$input_threads" ]; then
+        CPU_THREADS=$input_threads
+    fi
+    
+    save_config
+    generate_ccminer_config
+    generate_mining_script
+}
+
+# Display available pools
+display_pools() {
+    echo -e "${CYAN}=== AVAILABLE MINING POOLS ===${NC}"
+    
+    echo -e "\n${GREEN}VIPOR POOLS:${NC}"
+    for region in "${!VIPOR_POOLS[@]}"; do
+        echo -e "  ${YELLOW}$region${NC}: ${VIPOR_POOLS[$region]}"
+    done
+    
+    echo -e "\n${GREEN}LUCKPOOL POOLS:${NC}"
+    for region in "${!LUCKPOOL_POOLS[@]}"; do
+        echo -e "  ${YELLOW}$region${NC}: ${LUCKPOOL_POOLS[$region]}"
+    done
+}
+
+# Generate ccminer configuration
+generate_ccminer_config() {
+    local pool_url=""
+    local wallet=""
+    
+    if [ "$SELECTED_POOL" = "vipor" ]; then
+        pool_url="${VIPOR_POOLS["Europe"]}"
+        wallet="$VIPOR_WALLET"
+    else
+        pool_url="${LUCKPOOL_POOLS["Europe"]}"
+        wallet="$LUCKPOOL_WALLET"
+    fi
+    
+    cat > "$CCMINER_CONFIG" << EOF
+{
+    "pools": [
+        {
+            "url": "stratum+tcp://$pool_url",
+            "user": "$wallet",
+            "pass": "x",
+            "algo": "$SELECTED_ALGO",
+            "nicehash": false
+        }
+    ],
+    "threads": $CPU_THREADS,
+    "cpu-affinity": null,
+    "algo": "$SELECTED_ALGO",
+    "api-port": 4068,
+    "api-bind": "127.0.0.1",
+    "retry-pause": 5,
+    "max-temp": 85
+}
+EOF
+    echo -e "${GREEN}File konfigurasi ccminer dibuat: $CCMINER_CONFIG${NC}"
+}
+
+# Generate mining script
+generate_mining_script() {
+    cat > "$MINING_SCRIPT" << 'EOF'
+#!/bin/bash
+# Auto Mining Script
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+CONFIG_FILE="$HOME/.mining_monitor.conf"
+CCMINER_CONFIG="$HOME/ccminer_config.json"
+
+# Load configuration
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+else
+    echo -e "${RED}Config file not found! Run setup first.${NC}"
+    exit 1
+fi
+
+# Function to get pool URL
+get_pool_url() {
+    local pool=$1
+    local region=$2
+    
+    if [ "$pool" = "vipor" ]; then
+        case $region in
+            "US-East") echo "stratum.vipor.net:3000" ;;
+            "US-West") echo "stratum.vipor.net:3001" ;;
+            "Europe") echo "stratum.vipor.net:3002" ;;
+            "Asia") echo "stratum.vipor.net:3003" ;;
+            "Australia") echo "stratum.vipor.net:3004" ;;
+            "Canada") echo "stratum.vipor.net:3005" ;;
+            "Germany") echo "stratum.vipor.net:3006" ;;
+            "France") echo "stratum.vipor.net:3007" ;;
+            "UK") echo "stratum.vipor.net:3008" ;;
+            "Brazil") echo "stratum.vipor.net:3009" ;;
+            *) echo "stratum.vipor.net:3002" ;;
+        esac
+    else
+        case $region in
+            "US-East") echo "na.luckpool.net:3956" ;;
+            "US-West") echo "us.luckpool.net:3956" ;;
+            "Europe") echo "eu.luckpool.net:3956" ;;
+            "Asia") echo "asia.luckpool.net:3956" ;;
+            "Australia") echo "au.luckpool.net:3956" ;;
+            "Canada") echo "ca.luckpool.net:3956" ;;
+            "Germany") echo "de.luckpool.net:3956" ;;
+            "France") echo "fr.luckpool.net:3956" ;;
+            "UK") echo "uk.luckpool.net:3956" ;;
+            "Brazil") echo "br.luckpool.net:3956" ;;
+            *) echo "eu.luckpool.net:3956" ;;
+        esac
+    fi
+}
+
+# Region selection
+select_region() {
+    echo -e "${YELLOW}Pilih Region Terdekat:${NC}"
+    echo "1) US-East     6) Canada"
+    echo "2) US-West     7) Germany" 
+    echo "3) Europe      8) France"
+    echo "4) Asia        9) UK"
+    echo "5) Australia  10) Brazil"
+    read -p "Pilih region [1-10]: " region_choice
+    
+    case $region_choice in
+        1) echo "US-East" ;;
+        2) echo "US-West" ;;
+        3) echo "Europe" ;;
+        4) echo "Asia" ;;
+        5) echo "Australia" ;;
+        6) echo "Canada" ;;
+        7) echo "Germany" ;;
+        8) echo "France" ;;
+        9) echo "UK" ;;
+        10) echo "Brazil" ;;
+        *) echo "Europe" ;;
+    esac
+}
+
+# Main mining function
+start_mining() {
+    clear
+    echo -e "${GREEN}"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                   AUTO MINING STARTUP                       ║"
+    echo "║                  VIPOR & LUCKPOOL                          ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    local region=$(select_region)
+    local pool_url=$(get_pool_url "$SELECTED_POOL" "$region")
+    local wallet=""
+    
+    if [ "$SELECTED_POOL" = "vipor" ]; then
+        wallet="$VIPOR_WALLET"
+        echo -e "${BLUE}Mining di Vipor Pool - $region${NC}"
+    else
+        wallet="$LUCKPOOL_WALLET"
+        echo -e "${BLUE}Mining di LuckPool - $region${NC}"
+    fi
+    
+    echo -e "${YELLOW}Pool: $pool_url${NC}"
+    echo -e "${YELLOW}Wallet: $wallet${NC}"
+    echo -e "${YELLOW}Algorithm: $SELECTED_ALGO${NC}"
+    echo -e "${YELLOW}Threads: $CPU_THREADS${NC}"
+    echo -e "${YELLOW}Region: $region${NC}"
+    echo
+    echo -e "${RED}Tekan Ctrl+C untuk menghentikan mining${NC}"
+    echo
+    
+    # Start ccminer (adjust path to your ccminer)
+    ./ccminer -a $SELECTED_ALGO -o stratum+tcp://$pool_url -u $wallet -p x -t $CPU_THREADS
+}
+
+# Check if ccminer exists
+if [ ! -f "./ccminer" ] && [ ! -f "/usr/local/bin/ccminer" ]; then
+    echo -e "${RED}ccminer tidak ditemukan!${NC}"
+    echo -e "${YELLOW}Download ccminer terlebih dahulu.${NC}"
+    exit 1
+fi
+
+start_mining
+EOF
+
+    chmod +x "$MINING_SCRIPT"
+    echo -e "${GREEN}Script mining dibuat: $MINING_SCRIPT${NC}"
+    echo -e "${YELLOW}Jalankan: $MINING_SCRIPT untuk memulai mining${NC}"
+}
+
+# Live mining monitor
+live_mining_monitor() {
+    if [ -z "$VIPOR_WALLET" ] || [ -z "$LUCKPOOL_WALLET" ]; then
+        echo -e "${RED}Setup wallet terlebih dahulu!${NC}"
+        return 1
+    fi
+    
+    local mining_pid=""
+    local api_port=4068
+    
+    # Check if mining is running
+    check_mining_status() {
+        if ps aux | grep -v grep | grep -q "ccminer"; then
+            return 0
+        else
+            return 1
+        fi
+    }
+    
+    # Get mining stats from API
+    get_mining_stats() {
+        if curl -s "http://127.0.0.1:$api_port" > /dev/null 2>&1; then
+            local stats=$(curl -s "http://127.0.0.1:$api_port")
+            echo "$stats"
+        else
+            echo ""
+        fi
+    }
+    
+    while true; do
+        clear
+        echo -e "${PURPLE}"
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║                 LIVE MINING MONITOR                        ║"
+        echo "║                  REAL-TIME STATS                           ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
+        echo -e "${NC}"
+        
+        # Mining Status
+        echo -e "${CYAN}=== MINING STATUS ===${NC}"
+        if check_mining_status; then
+            echo -e "${GREEN}✅ MINING ACTIVE${NC}"
+            mining_pid=$(pgrep ccminer)
+            echo -e "${YELLOW}PID: $mining_pid${NC}"
+            
+            # Try to get API stats
+            local stats=$(get_mining_stats)
+            if [ ! -z "$stats" ]; then
+                local hash_rate=$(echo "$stats" | grep -o '"hashrate":[^,]*' | cut -d':' -f2)
+                local accepted=$(echo "$stats" | grep -o '"accepted":[^,]*' | cut -d':' -f2)
+                local rejected=$(echo "$stats" | grep -o '"rejected":[^,]*' | cut -d':' -f2)
+                
+                echo -e "${BLUE}⛏️  Hash Rate: ${hash_rate:-N/A} H/s${NC}"
+                echo -e "${GREEN}✅ Shares Accepted: ${accepted:-0}${NC}"
+                echo -e "${RED}❌ Shares Rejected: ${rejected:-0}${NC}"
+            else
+                echo -e "${YELLOW}📊 API Stats: Not available${NC}"
+            fi
+        else
+            echo -e "${RED}❌ MINING STOPPED${NC}"
+            echo -e "${YELLOW}Jalankan mining dari menu untuk memulai${NC}"
+        fi
+        
+        echo
+        
+        # Pool Monitoring
+        echo -e "${CYAN}=== POOL MONITORING ===${NC}"
+        
+        # Vipor Stats
+        echo -e "${BLUE}╔════════════════ VIPOR ════════════════╗${NC}"
+        fetch_vipor_data
+        echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
+        
+        echo
+        
+        # LuckPool Stats
+        echo -e "${PURPLE}╔══════════════ LUCKPOOL ══════════════╗${NC}"
+        fetch_luckpool_data
+        echo -e "${PURPLE}╚═══════════════════════════════════════╝${NC}"
+        
+        echo
+        echo -e "${YELLOW}Last Update: $(date '+%H:%M:%S')${NC}"
+        echo -e "${CYAN}Auto refresh setiap 10 detik...${NC}"
+        echo -e "${RED}Tekan Ctrl+C untuk kembali ke menu${NC}"
+        
+        sleep 10
+    done
+}
+
+# Start auto mining
+start_auto_mining() {
+    if [ ! -f "$MINING_SCRIPT" ]; then
+        echo -e "${RED}Script mining belum dibuat!${NC}"
+        echo -e "${YELLOW}Jalankan setup mining terlebih dahulu.${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}Memulai auto mining...${NC}"
+    echo -e "${YELLOW}Membuka terminal baru untuk mining...${NC}"
+    
+    # Start mining in new terminal (adjust for your terminal)
+    if command -v gnome-terminal &> /dev/null; then
+        gnome-terminal -- bash -c "$MINING_SCRIPT; exec bash"
+    elif command -v xterm &> /dev/null; then
+        xterm -e bash -c "$MINING_SCRIPT; exec bash"
+    elif command -v konsole &> /dev/null; then
+        konsole -e bash -c "$MINING_SCRIPT; exec bash"
+    else
+        echo -e "${YELLOW}Terminal tidak didukung, jalankan manual:${NC}"
+        echo -e "${CYAN}bash $MINING_SCRIPT${NC}"
+    fi
+    
+    echo -e "${GREEN}Mining started! Gunakan Live Monitor untuk melihat statistik.${NC}"
+}
+
+# Stop mining
+stop_mining() {
+    if pkill ccminer; then
+        echo -e "${GREEN}✅ Mining dihentikan${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Tidak ada proses mining yang aktif${NC}"
+    fi
+}
+
+# Display header
+display_header() {
+    clear
+    echo -e "${PURPLE}"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║         MINING MONITOR & AUTO MINER - VIPOR & LUCKPOOL      ║"
+    echo "║                  Version 3.0 - Enhanced                     ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+# Display menu
+display_menu() {
+    echo -e "${CYAN}Menu Pilihan:${NC}"
+    echo -e "  ${GREEN}1${NC}) Live Monitor Pools (API)"
+    echo -e "  ${GREEN}2${NC}) Setup Mining Configuration"
+    echo -e "  ${GREEN}3${NC}) Start Auto Mining"
+    echo -e "  ${GREEN}4${NC}) Live Mining Monitor"
+    echo -e "  ${GREEN}5${NC}) Stop Mining"
+    echo -e "  ${GREEN}6${NC}) Tampilkan Pool Server"
+    echo -e "  ${GREEN}7${NC}) Keluar"
+    echo
+}
+
+# [Keep all the existing API functions from previous version: fetch_vipor_data, fetch_luckpool_data, etc.]
+# Fetch real data from Vipor API
+fetch_vipor_data() {
+    if [ -z "$VIPOR_WALLET" ]; then
+        echo -e "${RED}Wallet Vipor belum diatur!${NC}"
+        return 1
+    fi
+
+    local api_url="https://vipor.net/api/miner/${VIPOR_WALLET}/verus"
+    
+    local response
+    response=$(curl -s -H "User-Agent: Mining-Monitor/3.0" -H "Accept: application/json" "$api_url")
+    
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+        echo -e "${RED}Gagal mengambil data dari Vipor API${NC}"
+        return 1
+    fi
+    
+    # Parse JSON response
+    local status=$(echo "$response" | grep -o '"status":"[^"]*' | cut -d'"' -f4)
+    local hash_rate=$(echo "$response" | grep -o '"hash_rate":"[^"]*' | cut -d'"' -f4)
+    local balance=$(echo "$response" | grep -o '"balance":"[^"]*' | cut -d'"' -f4)
+    local shares_valid=$(echo "$response" | grep -o '"shares_valid":"[^"]*' | cut -d'"' -f4)
+    local shares_invalid=$(echo "$response" | grep -o '"shares_invalid":"[^"]*' | cut -d'"' -f4)
+    
+    # Display real data
+    echo -e "${GREEN}📊 Status: ${status:-Checking...}${NC}"
+    echo -e "${YELLOW}⛏️  Hash Rate: ${hash_rate:-0} H/s${NC}"
+    echo -e "${BLUE}💰 Balance: ${balance:-0} VRSC${NC}"
+    echo -e "${PURPLE}📈 Shares: ${shares_valid:-0} Valid, ${shares_invalid:-0} Invalid${NC}"
+    
+    return 0
+}
+
+# Fetch real data from LuckPool API
+fetch_luckpool_data() {
+    if [ -z "$LUCKPOOL_WALLET" ]; then
+        echo -e "${RED}Wallet LuckPool belum diatur!${NC}"
+        return 1
+    fi
+
+    local api_url="https://luckpool.net/verus/miner?${LUCKPOOL_WALLET}"
+    
+    local response
+    response=$(curl -s -H "User-Agent: Mining-Monitor/3.0" "$api_url")
+    
+    if [ $? -ne 0 ] || [ -z "$response" ]; then
+        echo -e "${RED}Gagal mengambil data dari LuckPool API${NC}"
+        return 1
+    fi
+    
+    # Parse HTML response for LuckPool
+    local miner_status=$(echo "$response" | grep -oE "miner-status[^>]*>[^<]*" | cut -d'>' -f2 | head -1)
+    local hash_rate=$(echo "$response" | grep -oE "Hash Rate[^<]*[0-9.]+" | grep -oE "[0-9.]+ H/s" | head -1)
+    local balance=$(echo "$response" | grep -oE "Balance[^<]*[0-9.]+" | grep -oE "[0-9.]+ VRSC" | head -1)
+    local workers=$(echo "$response" | grep -oE "Workers[^<]*[0-9]+" | grep -oE "[0-9]+" | head -1)
+    
+    # Display real data
+    echo -e "${GREEN}📊 Status: ${miner_status:-Checking...}${NC}"
+    echo -e "${YELLOW}⛏️  Hash Rate: ${hash_rate:-0 H/s}${NC}"
+    echo -e "${BLUE}💰 Balance: ${balance:-0 VRSC}${NC}"
+    echo -e "${CYAN}👷 Workers: ${workers:-0} Active${NC}"
+    
+    return 0
+}
+
+# Main function
+main() {
+    load_config
+    
+    while true; do
+        display_header
+        display_menu
+        
+        read -p "Pilih menu [1-7]: " choice
+        
+        case $choice in
+            1)
+                trap 'echo -e "\n${YELLOW}Kembali ke menu...${NC}"; sleep 1' INT
+                monitor_both_live
+                trap - INT
+                ;;
+            2)
+                setup_mining
+                ;;
+            3)
+                start_auto_mining
+                ;;
+            4)
+                trap 'echo -e "\n${YELLOW}Kembali ke menu...${NC}"; sleep 1' INT
+                live_mining_monitor
+                trap - INT
+                ;;
+            5)
+                stop_mining
+                ;;
+            6)
+                display_pools
+                ;;
+            7)
+                echo -e "${GREEN}Terima kasih! Keluar dari program.${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Pilihan tidak valid!${NC}"
+                sleep 1
+                ;;
+        esac
+        
+        echo
+        read -p "Tekan Enter untuk melanjutkan..."
+    done
+}
+
+# Check dependencies
+check_dependencies() {
+    local missing=()
+    
+    for cmd in curl grep pgrep; do
+        if ! command -v $cmd &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo -e "${RED}Error: Dependencies missing: ${missing[*]}${NC}"
+        echo -e "${YELLOW}Install dengan: sudo apt-get install ${missing[*]}${NC}"
+        echo
+        exit 1
+    fi
+}
+
+# Initialize
+check_dependencies
+main
