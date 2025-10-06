@@ -1,316 +1,458 @@
 #!/bin/bash
 
-# Mining Auto Configuration Script
-# Supports Vipor and Luckpool with real-time monitoring
+# Mining Manager Script for Vipor and Luckpool
+# Support multiple pools and real-time monitoring
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration file
 CONFIG_FILE="config.json"
-MINER_DIR="ccminer"
-WALLET_ADDRESS=""
-WORKER_NAME=""
-POOL_TYPE=""
-CPU_USAGE=""
+CCMINER_PATH="./ccminer"  # Adjust path to your ccminer
 
 # Pool configurations
-declare -A POOLS=(
-    ["vipor"]="sg.vipor.net:5040;na.vipor.net:5040;eu.vipor.net:5040;us.vipor.net:5040;au.vipor.net:5040;ca.vipor.net:5040;br.vipor.net:5040;in.vipor.net:5040;jp.vipor.net:5040;kr.vipor.net:5040"
-    ["luckpool"]="na.luckpool.net:3960;eu.luckpool.net:3960;ap.luckpool.net:3960;sa.luckpool.net:3960;ca.luckpool.net:3960;us.luckpool.net:3960;au.luckpool.net:3960;sg.luckpool.net:3960;jp.luckpool.net:3960;in.luckpool.net:3960"
+VIPOR_POOLS=(
+    "sg.vipor.net:5040"
+    "eu.vipor.net:5040"
+    "us.vipor.net:5040"
+    "au.vipor.net:5040"
+    "ca.vipor.net:5040"
+    "de.vipor.net:5040"
+    "fr.vipor.net:5040"
+    "jp.vipor.net:5040"
+    "kr.vipor.net:5040"
+    "br.vipor.net:5040"
 )
 
-# API endpoints
-VIPOR_API="https://vipor.net/api/miner/VRSC/"
-LUCKPOOL_API="https://luckpool.net/api/miner/"
+LUCKPOOL_POOLS=(
+    "na.luckpool.net:3960"
+    "eu.luckpool.net:3960"
+    "ap.luckpool.net:3960"
+    "sa.luckpool.net:3960"
+    "ca.luckpool.net:3960"
+    "de.luckpool.net:3960"
+    "fr.luckpool.net:3960"
+    "jp.luckpool.net:3960"
+    "sg.luckpool.net:3960"
+    "au.luckpool.net:3960"
+)
 
 # Function to display banner
 show_banner() {
     clear
     echo -e "${CYAN}"
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                   MINING AUTOMATION SCRIPT                   ║"
-    echo "║                  Support: Vipor & Luckpool                  ║"
+    echo "║                   MINING MANAGER SCRIPT                     ║"
+    echo "║                  VIPOR & LUCKPOOL MINER                     ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
 
-# Function to check dependencies
-check_dependencies() {
-    local deps=("curl" "jq" "wget")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            echo -e "${YELLOW}Installing $dep...${NC}"
-            sudo apt-get update && sudo apt-get install -y "$dep"
-        fi
-    done
+# Function to create default config
+create_default_config() {
+    cat > $CONFIG_FILE << EOF
+{
+    "mining_config": {
+        "vipor": {
+            "wallet": "",
+            "worker": "",
+            "cpu_usage": 80,
+            "current_pool": ""
+        },
+        "luckpool": {
+            "wallet": "",
+            "worker": "",
+            "cpu_usage": 80,
+            "current_pool": ""
+        }
+    }
+}
+EOF
+    echo -e "${GREEN}Config file created: $CONFIG_FILE${NC}"
 }
 
-# Function to download ccminer
-download_ccminer() {
-    if [ ! -d "$MINER_DIR" ]; then
-        echo -e "${YELLOW}Downloading ccminer...${NC}"
-        # Download ccminer (example URL - replace with actual ccminer download URL)
-        wget -O ccminer.tar.gz "https://github.com/trexminer/T-Rex/releases/download/0.25.9/t-rex-0.25.9-linux.tar.gz"
-        tar -xzf ccminer.tar.gz
-        mv t-rex-0.25.9-linux "$MINER_DIR"
-        chmod +x "$MINER_DIR"/*
-        rm ccminer.tar.gz
-        echo -e "${GREEN}ccminer downloaded successfully!${NC}"
+# Function to read config
+read_config() {
+    if [[ ! -f $CONFIG_FILE ]]; then
+        create_default_config
+    fi
+    
+    if command -v jq >/dev/null 2>&1; then
+        VIPOR_WALLET=$(jq -r '.mining_config.vipor.wallet' $CONFIG_FILE)
+        VIPOR_WORKER=$(jq -r '.mining_config.vipor.worker' $CONFIG_FILE)
+        VIPOR_CPU=$(jq -r '.mining_config.vipor.cpu_usage' $CONFIG_FILE)
+        VIPOR_CURRENT_POOL=$(jq -r '.mining_config.vipor.current_pool' $CONFIG_FILE)
+        
+        LUCKPOOL_WALLET=$(jq -r '.mining_config.luckpool.wallet' $CONFIG_FILE)
+        LUCKPOOL_WORKER=$(jq -r '.mining_config.luckpool.worker' $CONFIG_FILE)
+        LUCKPOOL_CPU=$(jq -r '.mining_config.luckpool.cpu_usage' $CONFIG_FILE)
+        LUCKPOOL_CURRENT_POOL=$(jq -r '.mining_config.luckpool.current_pool' $CONFIG_FILE)
+    else
+        echo -e "${YELLOW}jq not installed, using fallback config reading${NC}"
+        # Fallback basic parsing
+        VIPOR_WALLET=$(grep -A5 '"vipor"' $CONFIG_FILE | grep '"wallet"' | cut -d'"' -f4)
+        VIPOR_WORKER=$(grep -A5 '"vipor"' $CONFIG_FILE | grep '"worker"' | cut -d'"' -f4)
+        VIPOR_CPU=$(grep -A5 '"vipor"' $CONFIG_FILE | grep '"cpu_usage"' | tr -d ' ,' | cut -d':' -f2)
+        LUCKPOOL_WALLET=$(grep -A5 '"luckpool"' $CONFIG_FILE | grep '"wallet"' | cut -d'"' -f4)
+        LUCKPOOL_WORKER=$(grep -A5 '"luckpool"' $CONFIG_FILE | grep '"worker"' | cut -d'"' -f4)
+        LUCKPOOL_CPU=$(grep -A5 '"luckpool"' $CONFIG_FILE | grep '"cpu_usage"' | tr -d ' ,' | cut -d':' -f2)
     fi
 }
 
-# Function to show menu
-show_menu() {
-    echo -e "${BLUE}"
-    echo "Select Mining Pool:"
-    echo "1) Vipor Pool"
-    echo "2) Luckpool"
-    echo "3) Exit"
-    echo -e "${NC}"
-}
-
-# Function to get user input
-get_user_input() {
-    while true; do
-        read -p "Enter your choice (1-3): " choice
-        case $choice in
-            1)
-                POOL_TYPE="vipor"
-                break
-                ;;
-            2)
-                POOL_TYPE="luckpool"
-                break
-                ;;
-            3)
-                echo -e "${YELLOW}Exiting...${NC}"
-                exit 0
-                ;;
-            *)
-                echo -e "${RED}Invalid choice! Please select 1, 2, or 3.${NC}"
-                ;;
-        esac
-    done
-
-    read -p "Enter Wallet Address: " WALLET_ADDRESS
-    read -p "Enter Worker Name: " WORKER_NAME
+# Function to update config
+update_config() {
+    local pool_type=$1
+    local wallet=$2
+    local worker=$3
+    local cpu_usage=$4
+    local current_pool=$5
     
-    while true; do
-        read -p "Enter CPU Usage percentage (10-100): " CPU_USAGE
-        if [[ $CPU_USAGE =~ ^[1-9][0-9]?$|^100$ ]] && [ $CPU_USAGE -ge 10 ] && [ $CPU_USAGE -le 100 ]; then
-            break
-        else
-            echo -e "${RED}Please enter a valid CPU usage between 10 and 100${NC}"
-        fi
-    done
+    if command -v jq >/dev/null 2>&1; then
+        jq --arg pool "$pool_type" \
+           --arg wallet "$wallet" \
+           --arg worker "$worker" \
+           --arg cpu "$cpu_usage" \
+           --arg current_pool "$current_pool" \
+           '.mining_config[$pool].wallet = $wallet |
+            .mining_config[$pool].worker = $worker |
+            .mining_config[$pool].cpu_usage = ($cpu | tonumber) |
+            .mining_config[$pool].current_pool = $current_pool' \
+           $CONFIG_FILE > config.tmp && mv config.tmp $CONFIG_FILE
+    else
+        echo -e "${YELLOW}jq not available, config update skipped${NC}"
+    fi
 }
 
-# Function to create config.json
-create_config() {
-    local pool_servers=(${POOLS[$POOL_TYPE]//;/ })
+# Function to show pool selection
+select_pool() {
+    local pool_type=$1
+    local pools=()
     
-    cat > "$CONFIG_FILE" << EOF
-{
-    "pool_type": "$POOL_TYPE",
-    "wallet_address": "$WALLET_ADDRESS",
-    "worker_name": "$WORKER_NAME",
-    "cpu_usage": $CPU_USAGE,
-    "pools": [
-EOF
-
-    for ((i=0; i<${#pool_servers[@]}; i++)); do
-        if [ $i -eq $((${#pool_servers[@]}-1)) ]; then
-            echo "        \"${pool_servers[$i]}\"" >> "$CONFIG_FILE"
-        else
-            echo "        \"${pool_servers[$i]}\"," >> "$CONFIG_FILE"
-        fi
-    done
-
-    cat >> "$CONFIG_FILE" << EOF
-    ],
-    "algorithm": "verus",
-    "intensity": $CPU_USAGE
-}
-EOF
-    echo -e "${GREEN}Configuration file created: $CONFIG_FILE${NC}"
-}
-
-# Function to get pool stats from API
-get_pool_stats() {
-    local wallet=$1
-    local pool=$2
+    if [[ $pool_type == "vipor" ]]; then
+        pools=("${VIPOR_POOLS[@]}")
+        echo -e "${CYAN}Select Vipor Pool:${NC}"
+    else
+        pools=("${LUCKPOOL_POOLS[@]}")
+        echo -e "${CYAN}Select Luckpool Pool:${NC}"
+    fi
     
-    case $pool in
-        "vipor")
-            local api_url="${VIPOR_API}${wallet}/verus"
-            curl -s "$api_url" | jq '.'
+    for i in "${!pools[@]}"; do
+        echo -e "${GREEN}$((i+1)).${NC} ${pools[$i]} - All Country"
+    done
+    echo -e "${GREEN}11.${NC} Auto Select (Best Ping)"
+    
+    local choice
+    read -p "Enter your choice (1-11): " choice
+    
+    case $choice in
+        [1-9]|10)
+            local index=$((choice-1))
+            echo "${pools[$index]}"
             ;;
-        "luckpool")
-            local api_url="${LUCKPOOL_API}${wallet}"
-            curl -s "$api_url" | jq '.'
+        11)
+            echo "auto"
+            ;;
+        *)
+            echo "${pools[0]}"
             ;;
     esac
 }
 
-# Function to display mining dashboard
-show_dashboard() {
-    local wallet=$1
-    local worker=$2
-    local pool=$3
+# Function to get user input
+get_mining_input() {
+    local pool_type=$1
     
+    echo -e "\n${YELLOW}=== $pool_type Mining Configuration ===${NC}"
+    
+    # Wallet Address
+    read -p "Enter Wallet Address: " wallet
+    
+    # Worker Name
+    read -p "Enter Worker Name: " worker
+    
+    # CPU Usage
     while true; do
-        clear
-        show_banner
-        
-        echo -e "${GREEN}=== MINING DASHBOARD ===${NC}"
-        echo -e "${CYAN}Pool:${NC} $pool"
-        echo -e "${CYAN}Wallet:${NC} $wallet"
-        echo -e "${CYAN}Worker:${NC} $worker"
-        echo -e "${CYAN}CPU Usage:${NC} $CPU_USAGE%"
-        echo
-        
-        # Get and display pool statistics
-        echo -e "${YELLOW}=== POOL STATISTICS ===${NC}"
-        local stats=$(get_pool_stats "$wallet" "$pool")
-        
-        if [ "$pool" == "vipor" ]; then
-            local hashrate=$(echo "$stats" | jq -r '.hashrate // "N/A"')
-            local balance=$(echo "$stats" | jq -r '.balance // "N/A"')
-            local workers=$(echo "$stats" | jq -r '.workers // "N/A"')
-            local last_share=$(echo "$stats" | jq -r '.lastShare // "N/A"')
-            
-            echo -e "Hashrate: ${GREEN}$hashrate${NC}"
-            echo -e "Balance: ${GREEN}$balance${NC}"
-            echo -e "Active Workers: ${GREEN}$workers${NC}"
-            echo -e "Last Share: ${GREEN}$last_share${NC}"
-            
-            # Display monitoring URL
-            echo -e "\n${CYAN}Monitoring URL:${NC}"
-            echo -e "https://vipor.net/miner/VRSC/$wallet/verus"
-            
-        elif [ "$pool" == "luckpool" ]; then
-            local hashrate=$(echo "$stats" | jq -r '.hashrate // "N/A"')
-            local balance=$(echo "$stats" | jq -r '.balance // "N/A"')
-            local miners=$(echo "$stats" | jq -r '.miners // "N/A"')
-            local last_submit=$(echo "$stats" | jq -r '.lastSubmit // "N/A"')
-            
-            echo -e "Hashrate: ${GREEN}$hashrate${NC}"
-            echo -e "Balance: ${GREEN}$balance${NC}"
-            echo -e "Active Miners: ${GREEN}$miners${NC}"
-            echo -e "Last Submit: ${GREEN}$last_submit${NC}"
-            
-            # Display monitoring URL
-            echo -e "\n${CYAN}Monitoring URL:${NC}"
-            echo -e "https://luckpool.net/verus/miner.html?$wallet"
+        read -p "Enter CPU Usage Percentage (10-100): " cpu_usage
+        if [[ $cpu_usage =~ ^[0-9]+$ ]] && [ $cpu_usage -ge 10 ] && [ $cpu_usage -le 100 ]; then
+            break
+        else
+            echo -e "${RED}Invalid CPU usage! Please enter between 10-100.${NC}"
         fi
-        
-        echo -e "\n${YELLOW}=== MINING LOG ===${NC}"
-        echo -e "${GREEN}Mining is active...${NC}"
-        echo -e "Pool: $pool"
-        echo -e "Worker: $worker"
-        echo -e "CPU: $CPU_USAGE%"
-        echo -e "Status: ${GREEN}RUNNING${NC}"
-        
-        echo -e "\n${CYAN}Press Ctrl+C to stop mining and return to menu${NC}"
-        sleep 10
     done
+    
+    # Pool Selection
+    local selected_pool=$(select_pool $pool_type)
+    
+    update_config $pool_type "$wallet" "$worker" "$cpu_usage" "$selected_pool"
+    
+    echo "$wallet" "$worker" "$cpu_usage" "$selected_pool"
 }
 
 # Function to start mining
 start_mining() {
-    local pool_servers=(${POOLS[$POOL_TYPE]//;/ })
-    local primary_pool="${pool_servers[0]}"
+    local pool_type=$1
+    read_config
     
-    echo -e "${GREEN}Starting mining on $POOL_TYPE...${NC}"
-    echo -e "${YELLOW}Primary Pool: $primary_pool${NC}"
-    echo -e "${YELLOW}Wallet: $WALLET_ADDRESS${NC}"
-    echo -e "${YELLOW}Worker: $WORKER_NAME${NC}"
-    echo -e "${YELLOW}CPU Usage: $CPU_USAGE%${NC}"
+    if [[ $pool_type == "vipor" ]]; then
+        local wallet=$VIPOR_WALLET
+        local worker=$VIPOR_WORKER
+        local cpu_usage=$VIPOR_CPU
+        local pool=${VIPOR_CURRENT_POOL:-${VIPOR_POOLS[0]}}
+        local algorithm="verus"
+    else
+        local wallet=$LUCKPOOL_WALLET
+        local worker=$LUCKPOOL_WORKER
+        local cpu_usage=$LUCKPOOL_CPU
+        local pool=${LUCKPOOL_CURRENT_POOL:-${LUCKPOOL_POOLS[0]}}
+        local algorithm="verus"
+    fi
+    
+    if [[ -z $wallet ]] || [[ -z $worker ]]; then
+        echo -e "${RED}Wallet or Worker not configured! Please configure first.${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}Starting $pool_type mining...${NC}"
+    echo -e "${CYAN}Wallet:${NC} $wallet"
+    echo -e "${CYAN}Worker:${NC} $worker"
+    echo -e "${CYAN}Pool:${NC} $pool"
+    echo -e "${CYAN}CPU Usage:${NC} $cpu_usage%"
     
     # Build mining command
-    local mining_cmd=""
-    if [ -d "$MINER_DIR" ]; then
-        if [ "$POOL_TYPE" == "vipor" ]; then
-            mining_cmd="./$MINER_DIR/t-rex -a verus -o stratum+tcp://$primary_pool -u $WALLET_ADDRESS.$WORKER_NAME -p x -i $CPU_USAGE"
-        else
-            mining_cmd="./$MINER_DIR/t-rex -a verus -o stratum+tcp://$primary_pool -u $WALLET_ADDRESS.$WORKER_NAME -p x -i $CPU_USAGE"
-        fi
-        
-        echo -e "${CYAN}Mining Command:${NC}"
-        echo "$mining_cmd"
-        echo
-        
-        # Start mining in background and show dashboard
-        cd "$MINER_DIR" && eval "$mining_cmd" &
-        local mining_pid=$!
-        cd ..
-        
-        # Show dashboard
-        show_dashboard "$WALLET_ADDRESS" "$WORKER_NAME" "$POOL_TYPE" &
-        local dashboard_pid=$!
-        
-        # Wait for user interrupt
-        trap "kill $mining_pid $dashboard_pid 2>/dev/null; echo -e '\n${YELLOW}Mining stopped${NC}'; return" INT
-        wait
-        
+    local mining_cmd="$CCMINER_PATH -a $algorithm -o stratum+tcp://$pool -u $wallet.$worker -p x --cpu-threads $cpu_usage"
+    
+    echo -e "${YELLOW}Command:${NC} $mining_cmd"
+    echo -e "${GREEN}Mining started! Press Ctrl+C to stop.${NC}"
+    
+    # Start mining
+    eval $mining_cmd
+}
+
+# Function to show monitoring
+show_monitoring() {
+    local pool_type=$1
+    read_config
+    
+    if [[ $pool_type == "vipor" ]]; then
+        local wallet=$VIPOR_WALLET
+        local monitor_url="https://vipor.net/miner/VRSC/$wallet/verus"
     else
-        echo -e "${RED}Miner not found! Please check the installation.${NC}"
+        local wallet=$LUCKPOOL_WALLET
+        local monitor_url="https://luckpool.net/verus/miner.html?$wallet"
     fi
-}
-
-# Function to show pool information
-show_pool_info() {
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║                       POOL INFORMATION                       ║"
-    echo "╚══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
     
-    echo -e "${GREEN}=== VIPOR POOL ===${NC}"
-    echo "Pools: ${POOLS[vipor]//;/ }"
-    echo "Algorithm: Verus"
-    echo "Website: https://vipor.net"
-    echo "Monitoring: https://vipor.net/miner/VRSC/WALLET_ADDRESS/verus"
-    echo
+    if [[ -z $wallet ]]; then
+        echo -e "${RED}Wallet not configured!${NC}"
+        return 1
+    fi
     
-    echo -e "${GREEN}=== LUCKPOOL ===${NC}"
-    echo "Pools: ${POOLS[luckpool]//;/ }"
-    echo "Algorithm: Verus"
-    echo "Website: https://luckpool.net"
-    echo "Monitoring: https://luckpool.net/verus/miner.html?WALLET_ADDRESS"
-    echo
-}
-
-# Main function
-main() {
-    show_banner
-    check_dependencies
+    echo -e "${CYAN}Opening $pool_type monitoring dashboard...${NC}"
+    echo -e "${YELLOW}URL:${NC} $monitor_url"
+    
+    # Try to open in browser if available, else show URL
+    if command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$monitor_url" 2>/dev/null &
+    elif command -v gnome-open >/dev/null 2>&1; then
+        gnome-open "$monitor_url" 2>/dev/null &
+    fi
+    
+    # Show real-time monitoring in terminal using curl
+    echo -e "\n${GREEN}Real-time Monitoring Data:${NC}"
     
     while true; do
-        show_banner
-        show_pool_info
-        show_menu
-        get_user_input
+        clear
+        echo -e "${CYAN}=== $pool_type Real-time Monitoring ===${NC}"
+        echo -e "${YELLOW}Wallet:${NC} $wallet"
+        echo -e "${YELLOW}Monitor URL:${NC} $monitor_url"
+        echo -e "${YELLOW}Last Update:${NC} $(date)"
+        echo -e "\n${GREEN}Fetching data...${NC}"
         
-        if [ -n "$POOL_TYPE" ]; then
-            download_ccminer
-            create_config
-            start_mining
-        fi
+        # Fetch monitoring data (simplified - in real scenario you'd use API)
+        curl -s --max-time 10 "$monitor_url" | grep -o '<div[^>]*class=\"[^\"]*stat[^\"]*\"[^>]*>[^<]*</div>' | head -10 | while read line; do
+            echo "$line" | sed 's/<[^>]*>//g' | xargs
+        done
         
-        read -p "Press Enter to continue or Ctrl+C to exit..."
+        echo -e "\n${YELLOW}Press Ctrl+C to return to menu${NC}"
+        sleep 30
     done
 }
 
-# Handle script interruption
-trap "echo -e '\n${RED}Script interrupted. Exiting...${NC}'; exit 1" INT
+# Function to show dashboard
+show_dashboard() {
+    read_config
+    
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== MINING DASHBOARD ===${NC}"
+        echo
+        echo -e "${YELLOW}VIPOR CONFIGURATION:${NC}"
+        echo -e "  Wallet: ${GREEN}$VIPOR_WALLET${NC}"
+        echo -e "  Worker: ${GREEN}$VIPOR_WORKER${NC}"
+        echo -e "  CPU Usage: ${GREEN}$VIPOR_CPU%${NC}"
+        echo -e "  Current Pool: ${GREEN}$VIPOR_CURRENT_POOL${NC}"
+        echo
+        echo -e "${YELLOW}LUCKPOOL CONFIGURATION:${NC}"
+        echo -e "  Wallet: ${GREEN}$LUCKPOOL_WALLET${NC}"
+        echo -e "  Worker: ${GREEN}$LUCKPOOL_WORKER${NC}"
+        echo -e "  CPU Usage: ${GREEN}$LUCKPOOL_CPU%${NC}"
+        echo -e "  Current Pool: ${GREEN}$LUCKPOOL_CURRENT_POOL${NC}"
+        echo
+        echo -e "${CYAN}SYSTEM INFORMATION:${NC}"
+        echo -e "  CPU Usage: ${GREEN}$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')%${NC}"
+        echo -e "  Memory: ${GREEN}$(free -m | awk 'NR==2{printf "%.2f%%", $3*100/$2}')${NC}"
+        echo -e "  Uptime: ${GREEN}$(uptime -p)${NC}"
+        echo
+        echo -e "${YELLOW}Press Enter to return to menu...${NC}"
+        read
+        break
+    done
+}
 
-# Run main function
-main "$@"
+# Function to show available pools
+show_pools() {
+    local pool_type=$1
+    
+    clear
+    show_banner
+    echo -e "${CYAN}=== AVAILABLE POOLS - ${pool_type^^} ===${NC}"
+    echo
+    
+    if [[ $pool_type == "vipor" ]]; then
+        pools=("${VIPOR_POOLS[@]}")
+    else
+        pools=("${LUCKPOOL_POOLS[@]}")
+    fi
+    
+    for pool in "${pools[@]}"; do
+        echo -e "${GREEN}✓${NC} $pool - All Country"
+        
+        # Simple ping test
+        host=$(echo $pool | cut -d: -f1)
+        port=$(echo $pool | cut -d: -f2)
+        
+        if ping -c 1 -W 1 $host &> /dev/null; then
+            echo -e "  ${GREEN}●${NC} Online"
+        else
+            echo -e "  ${RED}●${NC} Offline"
+        fi
+        echo
+    done
+    
+    echo -e "${YELLOW}Press Enter to return...${NC}"
+    read
+}
+
+# Main menu
+main_menu() {
+    while true; do
+        clear
+        show_banner
+        echo -e "${CYAN}=== MAIN MENU ===${NC}"
+        echo
+        echo -e "${GREEN}1.${NC} Configure Vipor Mining"
+        echo -e "${GREEN}2.${NC} Configure Luckpool Mining"
+        echo -e "${GREEN}3.${NC} Start Vipor Mining"
+        echo -e "${GREEN}4.${NC} Start Luckpool Mining"
+        echo -e "${GREEN}5.${NC} Vipor Monitoring"
+        echo -e "${GREEN}6.${NC} Luckpool Monitoring"
+        echo -e "${GREEN}7.${NC} Show Dashboard"
+        echo -e "${GREEN}8.${NC} Show Available Pools - Vipor"
+        echo -e "${GREEN}9.${NC} Show Available Pools - Luckpool"
+        echo -e "${GREEN}0.${NC} Exit"
+        echo
+        read -p "Enter your choice: " choice
+        
+        case $choice in
+            1)
+                get_mining_input "vipor"
+                ;;
+            2)
+                get_mining_input "luckpool"
+                ;;
+            3)
+                start_mining "vipor"
+                ;;
+            4)
+                start_mining "luckpool"
+                ;;
+            5)
+                show_monitoring "vipor"
+                ;;
+            6)
+                show_monitoring "luckpool"
+                ;;
+            7)
+                show_dashboard
+                ;;
+            8)
+                show_pools "vipor"
+                ;;
+            9)
+                show_pools "luckpool"
+                ;;
+            0)
+                echo -e "${GREEN}Thank you for using Mining Manager!${NC}"
+                exit 0
+                ;;
+            *)
+                echo -e "${RED}Invalid choice!${NC}"
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# Check dependencies
+check_dependencies() {
+    local missing=()
+    
+    # Check for jq (optional)
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "${YELLOW}Warning: jq not installed. Some features may be limited.${NC}"
+        echo -e "Install with: sudo apt-get install jq"
+    fi
+    
+    # Check for curl
+    if ! command -v curl >/dev/null 2>&1; then
+        missing+=("curl")
+    fi
+    
+    # Check if ccminer exists
+    if [[ ! -f $CCMINER_PATH ]]; then
+        echo -e "${RED}Error: ccminer not found at $CCMINER_PATH${NC}"
+        echo -e "Please update CCMINER_PATH variable in the script"
+        exit 1
+    fi
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${RED}Missing dependencies: ${missing[*]}${NC}"
+        echo -e "Install with: sudo apt-get install ${missing[*]}"
+        exit 1
+    fi
+}
+
+# Initialize script
+init_script() {
+    echo -e "${CYAN}Initializing Mining Manager...${NC}"
+    
+    # Check dependencies
+    check_dependencies
+    
+    # Create config if not exists
+    if [[ ! -f $CONFIG_FILE ]]; then
+        create_default_config
+    fi
+    
+    # Make script executable
+    chmod +x "$0"
+}
+
+# Main execution
+init_script
+main_menu
