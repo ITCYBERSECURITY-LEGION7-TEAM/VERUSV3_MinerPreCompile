@@ -86,8 +86,8 @@ create_config() {
     "pools": [{
         "url": "$pool",
         "user": "$wallet.$worker",
-        "pass": "x",
-        "algo": "yespower",
+        "pass": "hybrid",
+        "algo": "verus",
         "nicehash": false
     }],
     "api": {
