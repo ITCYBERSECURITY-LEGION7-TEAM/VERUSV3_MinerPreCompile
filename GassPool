@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Mining Manager Script - VIPOR & LUCKPOOL
-# Created for Linux mining operations
+# Mining Auto Configuration Script
+# Supports Vipor and Luckpool with animated UI
 
 # Colors for UI
 RED='\033[0;31m'
@@ -11,417 +11,288 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 WHITE='\033[1;37m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
 # Configuration file
 CONFIG_FILE="config.json"
 CCMINER_PATH="./ccminer"  # Adjust path to your ccminer
 
-# Pool configurations
+# Vipor Pools (10 pools)
 VIPOR_POOLS=(
     "sg.vipor.net:5040"
-    "eu.vipor.net:5040" 
+    "eu.vipor.net:5040"
     "us.vipor.net:5040"
-    "jp.vipor.net:5040"
-    "au.vipor.net:5040"
     "ca.vipor.net:5040"
-    "br.vipor.net:5040"
-    "in.vipor.net:5040"
+    "au.vipor.net:5040"
+    "jp.vipor.net:5040"
     "kr.vipor.net:5040"
-    "de.vipor.net:5040"
+    "br.vipor.net:5040"
+    "ru.vipor.net:5040"
+    "in.vipor.net:5040"
 )
 
+# Luckpool Pools (10 pools)
 LUCKPOOL_POOLS=(
     "na.luckpool.net:3960"
     "eu.luckpool.net:3960"
     "ap.luckpool.net:3960"
     "sa.luckpool.net:3960"
-    "us.luckpool.net:3960"
     "ca.luckpool.net:3960"
-    "de.luckpool.net:3960"
-    "fr.luckpool.net:3960"
-    "jp.luckpool.net:3960"
+    "au.luckpool.net:3960"
     "sg.luckpool.net:3960"
+    "jp.luckpool.net:3960"
+    "kr.luckpool.net:3960"
+    "in.luckpool.net:3960"
 )
 
 # Animation functions
-show_hacker_animation() {
+show_animation() {
+    local frames=("▰▱▱▱▱▱▱" "▰▰▱▱▱▱▱" "▰▰▰▱▱▱▱" "▰▰▰▰▱▱▱" "▰▰▰▰▰▱▱" "▰▰▰▰▰▰▱" "▰▰▰▰▰▰▰" "▰▰▰▰▰▰▱" "▰▰▰▰▰▱▱" "▰▰▰▰▱▱▱" "▰▰▰▱▱▱▱" "▰▰▱▱▱▱▱")
+    for i in {1..3}; do
+        for frame in "${frames[@]}"; do
+            echo -ne "\r${CYAN}[${frame}]${NC} Initializing Mining System..."
+            sleep 0.1
+        done
+    done
+    echo -e "\r${GREEN}[▰▰▰▰▰▰▰]${NC} Mining System Ready!          "
+}
+
+progress_bar() {
     local duration=$1
-    local chars=("█" "▓" "▒" "░" "▄" "▀" "■" "□" "▢" "▣" "▤" "▥" "▦" "▧" "▨" "▩" "▪" "▫" "▬" "▭" "▮" "▯" "▰" "▱")
-    local steps=100
-    local delay=$(echo "scale=3; $duration/$steps" | bc)
-    
-    echo -e "\n${CYAN}🚀 INITIALIZING MINING SYSTEM...${NC}"
-    
-    for ((i=0; i<=$steps; i++)); do
-        local percent=$((i))
-        local char_index=$((i % ${#chars[@]}))
-        local char="${chars[$char_index]}"
+    local steps=50
+    for ((i=0; i<=steps; i++)); do
+        percentage=$((i * 2))
+        completed=$((i * 50 / steps))
+        remaining=$((50 - completed))
+        bar=$(printf "%0.s▰" $(seq 1 $completed))
+        empty=$(printf "%0.s▱" $(seq 1 $remaining))
         
-        # Create progress bar
-        local bar=""
-        local bar_length=50
-        local filled=$((i * bar_length / steps))
-        local empty=$((bar_length - filled))
+        # Color changes based on percentage
+        if [ $percentage -lt 30 ]; then
+            color=$RED
+        elif [ $percentage -lt 70 ]; then
+            color=$YELLOW
+        else
+            color=$GREEN
+        fi
         
-        for ((j=0; j<filled; j++)); do
-            bar+="${GREEN}${char}${NC}"
-        done
-        
-        for ((j=0; j<empty; j++)); do
-            bar+="${RED}${chars[0]}${NC}"
-        done
-        
-        # Display animation
-        echo -ne "\r${PURPLE}[HACKER MODE] ${bar} ${percent}% ${char}${NC}"
-        sleep $delay
+        echo -ne "\r${color}[${bar}${empty}] ${percentage}%${NC}"
+        sleep $(echo "scale=2; $duration/$steps" | bc)
     done
-    echo -e "\n${GREEN}✅ SYSTEM READY!${NC}\n"
+    echo
 }
 
-show_mining_animation() {
-    local pool_name=$1
-    local worker=$2
-    echo -e "\n${CYAN}⛏️  MINING STARTED ON ${pool_name}${NC}"
-    echo -e "${GREEN}👷 WORKER: ${worker}${NC}"
+# Check if ccminer exists
+check_ccminer() {
+    if [ ! -f "$CCMINER_PATH" ]; then
+        echo -e "${RED}Error: ccminer not found at $CCMINER_PATH${NC}"
+        echo -e "${YELLOW}Please update CCMINER_PATH variable in the script${NC}"
+        exit 1
+    fi
     
-    local mining_chars=("⛏️" "⚒️" "🔨" "💎" "⭐" "🌟" "💫" "✨" "🔥" "💻")
-    local i=0
-    
-    while true; do
-        local char_index=$((i % ${#mining_chars[@]}))
-        local char="${mining_chars[$char_index]}"
-        local hashrate=$((RANDOM % 1000 + 500))
-        local shares=$((RANDOM % 100))
-        
-        echo -ne "\r${YELLOW}${char} MINING... Hashrate: ${hashrate} H/s | Shares: ${shares} ${char}${NC}"
-        sleep 0.5
-        ((i++))
-    done
+    if [ ! -x "$CCMINER_PATH" ]; then
+        chmod +x "$CCMINER_PATH"
+    fi
 }
 
-# Function to create config.json
+# Create config.json
 create_config() {
     local pool=$1
     local wallet=$2
     local worker=$3
     local cpu_usage=$4
     
-    cat > $CONFIG_FILE << EOF
+    cat > "$CONFIG_FILE" << EOF
 {
     "pool": "$pool",
     "wallet": "$wallet",
     "worker": "$worker",
-    "cpu_usage": "$cpu_usage",
+    "cpu_usage": $cpu_usage,
     "algorithm": "verus",
-    "intensity": 16,
     "threads": $(nproc),
-    "auto_reconnect": true,
-    "retry_pause": 5,
-    "timeout": 300
+    "max-temp": 85,
+    "auto-start": true
 }
 EOF
-    echo -e "${GREEN}✅ Config file created: $CONFIG_FILE${NC}"
+    echo -e "${GREEN}Configuration file created: $CONFIG_FILE${NC}"
 }
 
-# Function to validate wallet address
-validate_wallet() {
-    local wallet=$1
-    if [[ ${#wallet} -lt 10 ]]; then
-        return 1
-    fi
-    return 0
-}
-
-# Function to validate worker name
-validate_worker() {
-    local worker=$1
-    if [[ ${#worker} -lt 1 ]]; then
-        return 1
-    fi
-    return 0
-}
-
-# Function to get CPU usage limit
-get_cpu_usage() {
-    while true; do
-        echo -e "${YELLOW}💻 Enter CPU usage percentage (10-100): ${NC}"
-        read -r cpu_usage
-        
-        if [[ $cpu_usage =~ ^[0-9]+$ ]] && [ $cpu_usage -ge 10 ] && [ $cpu_usage -le 100 ]; then
-            echo $cpu_usage
-            break
-        else
-            echo -e "${RED}❌ Invalid CPU usage! Please enter between 10-100${NC}"
-        fi
-    done
-}
-
-# VIPOR Mining function
-start_vipor_mining() {
-    clear
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════╗"
-    echo "║           VIPOR MINING SETUP         ║"
-    echo "╚══════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # Show available pools
-    echo -e "${YELLOW}🌐 Available VIPOR Pools:${NC}"
-    for i in "${!VIPOR_POOLS[@]}"; do
-        echo -e "${GREEN}$((i+1)). ${VIPOR_POOLS[$i]}${NC}"
-    done
-    
-    # Pool selection
-    local pool_index=0
-    while true; do
-        echo -e "\n${YELLOW}🔢 Select pool (1-${#VIPOR_POOLS[@]}): ${NC}"
-        read -r pool_choice
-        
-        if [[ $pool_choice =~ ^[0-9]+$ ]] && [ $pool_choice -ge 1 ] && [ $pool_choice -le ${#VIPOR_POOLS[@]} ]; then
-            pool_index=$((pool_choice-1))
-            break
-        else
-            echo -e "${RED}❌ Invalid selection!${NC}"
-        fi
-    done
-    
-    local selected_pool="${VIPOR_POOLS[$pool_index]}"
-    
-    # Wallet input
-    local wallet=""
-    while true; do
-        echo -e "\n${YELLOW}💰 Enter your Wallet Address: ${NC}"
-        read -r wallet
-        
-        if validate_wallet "$wallet"; then
-            break
-        else
-            echo -e "${RED}❌ Invalid wallet address!${NC}"
-        fi
-    done
-    
-    # Worker input
-    local worker=""
-    while true; do
-        echo -e "\n${YELLOW}👷 Enter Worker Name: ${NC}"
-        read -r worker
-        
-        if validate_worker "$worker"; then
-            break
-        else
-            echo -e "${RED}❌ Invalid worker name!${NC}"
-        fi
-    done
-    
-    # CPU usage
-    local cpu_usage=$(get_cpu_usage)
-    
-    # Show configuration summary
-    echo -e "\n${GREEN}✅ Configuration Summary:${NC}"
-    echo -e "${BLUE}🏊 Pool: $selected_pool${NC}"
-    echo -e "${BLUE}💰 Wallet: $wallet${NC}"
-    echo -e "${BLUE}👷 Worker: $worker${NC}"
-    echo -e "${BLUE}💻 CPU Usage: ${cpu_usage}%${NC}"
-    
-    # Create config
-    create_config "$selected_pool" "$wallet" "$worker" "$cpu_usage"
-    
-    # Show hacker animation
-    show_hacker_animation 3
-    
-    # Start mining (in background to allow animation)
-    echo -e "\n${GREEN}🚀 Starting CCminer for VIPOR...${NC}"
-    
-    # Start mining animation in background
-    show_mining_animation "VIPOR" "$worker" &
-    local animation_pid=$!
-    
-    # Start actual mining (replace with your ccminer command)
-    # Example: $CCMINER_PATH -a verus -o stratum+tcp://$selected_pool -u $wallet.$worker -p x -t $cpu_usage
-    
-    # For demo purposes, we'll just sleep
-    sleep 10
-    
-    # Stop animation
-    kill $animation_pid 2>/dev/null
-    wait $animation_pid 2>/dev/null
-    
-    echo -e "\n${GREEN}✅ Mining session completed!${NC}"
-}
-
-# LUCKPOOL Mining function
-start_luckpool_mining() {
-    clear
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════╗"
-    echo "║          LUCKPOOL MINING SETUP       ║"
-    echo "╚══════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # Show available pools
-    echo -e "${YELLOW}🌐 Available LUCKPOOL Pools:${NC}"
-    for i in "${!LUCKPOOL_POOLS[@]}"; do
-        echo -e "${GREEN}$((i+1)). ${LUCKPOOL_POOLS[$i]}${NC}"
-    done
-    
-    # Pool selection
-    local pool_index=0
-    while true; do
-        echo -e "\n${YELLOW}🔢 Select pool (1-${#LUCKPOOL_POOLS[@]}): ${NC}"
-        read -r pool_choice
-        
-        if [[ $pool_choice =~ ^[0-9]+$ ]] && [ $pool_choice -ge 1 ] && [ $pool_choice -le ${#LUCKPOOL_POOLS[@]} ]; then
-            pool_index=$((pool_choice-1))
-            break
-        else
-            echo -e "${RED}❌ Invalid selection!${NC}"
-        fi
-    done
-    
-    local selected_pool="${LUCKPOOL_POOLS[$pool_index]}"
-    
-    # Wallet input
-    local wallet=""
-    while true; do
-        echo -e "\n${YELLOW}💰 Enter your Wallet Address: ${NC}"
-        read -r wallet
-        
-        if validate_wallet "$wallet"; then
-            break
-        else
-            echo -e "${RED}❌ Invalid wallet address!${NC}"
-        fi
-    done
-    
-    # Worker input
-    local worker=""
-    while true; do
-        echo -e "\n${YELLOW}👷 Enter Worker Name: ${NC}"
-        read -r worker
-        
-        if validate_worker "$worker"; then
-            break
-        else
-            echo -e "${RED}❌ Invalid worker name!${NC}"
-        fi
-    done
-    
-    # CPU usage
-    local cpu_usage=$(get_cpu_usage)
-    
-    # Show configuration summary
-    echo -e "\n${GREEN}✅ Configuration Summary:${NC}"
-    echo -e "${BLUE}🏊 Pool: $selected_pool${NC}"
-    echo -e "${BLUE}💰 Wallet: $wallet${NC}"
-    echo -e "${BLUE}👷 Worker: $worker${NC}"
-    echo -e "${BLUE}💻 CPU Usage: ${cpu_usage}%${NC}"
-    
-    # Create config
-    create_config "$selected_pool" "$wallet" "$worker" "$cpu_usage"
-    
-    # Show hacker animation
-    show_hacker_animation 3
-    
-    # Start mining (in background to allow animation)
-    echo -e "\n${GREEN}🚀 Starting CCminer for LUCKPOOL...${NC}"
-    
-    # Start mining animation in background
-    show_mining_animation "LUCKPOOL" "$worker" &
-    local animation_pid=$!
-    
-    # Start actual mining (replace with your ccminer command)
-    # Example: $CCMINER_PATH -a verus -o stratum+tcp://$selected_pool -u $wallet.$worker -p x -t $cpu_usage
-    
-    # For demo purposes, we'll just sleep
-    sleep 10
-    
-    # Stop animation
-    kill $animation_pid 2>/dev/null
-    wait $animation_pid 2>/dev/null
-    
-    echo -e "\n${GREEN}✅ Mining session completed!${NC}"
-}
-
-# Main menu
-show_main_menu() {
+# Show mining header
+show_mining_header() {
     clear
     echo -e "${PURPLE}"
-    echo "╔══════════════════════════════════════╗"
-    echo "║    🚀 MINING MANAGER - HACKER MODE  ║"
-    echo "║          AUTO CONFIG SYSTEM         ║"
-    echo "╚══════════════════════════════════════╝"
+    echo "  ██████╗ ██████╗███╗   ███╗██╗███╗   ██╗███████╗██████╗ "
+    echo " ██╔════╝██╔════╝████╗ ████║██║████╗  ██║██╔════╝██╔══██╗"
+    echo " ██║     ██║     ██╔████╔██║██║██╔██╗ ██║█████╗  ██████╔╝"
+    echo " ██║     ██║     ██║╚██╔╝██║██║██║╚██╗██║██╔══╝  ██╔══██╗"
+    echo " ╚██████╗╚██████╗██║ ╚═╝ ██║██║██║ ╚████║███████╗██║  ██║"
+    echo "  ╚═════╝ ╚═════╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝"
     echo -e "${NC}"
-    
-    echo -e "${CYAN}▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄${NC}"
-    echo -e "${GREEN}1. 🏊 VIPOR MINING (10 Pools)${NC}"
-    echo -e "${GREEN}2. 🍀 LUCKPOOL MINING (10 Pools)${NC}"
-    echo -e "${GREEN}3. 📊 VIEW CURRENT CONFIG${NC}"
-    echo -e "${GREEN}4. 🚪 EXIT${NC}"
-    echo -e "${CYAN}▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀${NC}"
-    echo -e "${YELLOW}🎮 Select option (1-4): ${NC}"
+    echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║               MINING CONTROL PANEL           ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
+    echo
 }
 
-# View current config
-view_config() {
-    clear
-    echo -e "${CYAN}"
-    echo "╔══════════════════════════════════════╗"
-    echo "║         CURRENT CONFIGURATION        ║"
-    echo "╚══════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    if [ -f "$CONFIG_FILE" ]; then
-        echo -e "${GREEN}📁 Config file found: $CONFIG_FILE${NC}"
-        echo -e "\n${YELLOW}📋 Content:${NC}"
-        cat "$CONFIG_FILE" | while read line; do
-            echo -e "${BLUE}   $line${NC}"
-        done
-    else
-        echo -e "${RED}❌ No config file found!${NC}"
-    fi
-    
-    echo -e "\n${YELLOW}Press Enter to continue...${NC}"
-    read
+# Show pool selection
+show_pool_selection() {
+    echo -e "${YELLOW}Select Mining Pool:${NC}"
+    echo -e "${GREEN}1. Vipor Network${NC}"
+    echo -e "   ${WHITE}Pools available:${NC}"
+    for i in "${!VIPOR_POOLS[@]}"; do
+        echo -e "   ${CYAN}$((i+1)). ${VIPOR_POOLS[i]}${NC}"
+    done
+    echo
+    echo -e "${GREEN}2. Luckpool Network${NC}"
+    echo -e "   ${WHITE}Pools available:${NC}"
+    for i in "${!LUCKPOOL_POOLS[@]}"; do
+        echo -e "   ${CYAN}$((i+1)). ${LUCKPOOL_POOLS[i]}${NC}"
+    done
+    echo
 }
 
-# Main program loop
-main() {
-    # Check if bc is installed for calculations
-    if ! command -v bc &> /dev/null; then
-        echo -e "${RED}❌ 'bc' command is required. Install with: sudo apt-get install bc${NC}"
-        exit 1
-    fi
+# Get user input
+get_user_input() {
+    local choice
+    local wallet
+    local worker
+    local cpu_usage
     
     while true; do
-        show_main_menu
-        read -r choice
+        read -p "$(echo -e ${YELLOW}'Select pool type (1 for Vipor, 2 for Luckpool): '${NC})" choice
         
         case $choice in
             1)
-                start_vipor_mining
+                echo -e "${GREEN}Selected: Vipor Network${NC}"
+                pool_type="vipor"
+                selected_pools=("${VIPOR_POOLS[@]}")
+                break
                 ;;
             2)
-                start_luckpool_mining
-                ;;
-            3)
-                view_config
-                ;;
-            4)
-                echo -e "\n${GREEN}👋 Thank you for using Mining Manager!${NC}"
-                echo -e "${PURPLE}🚀 Happy Mining! 💎${NC}"
-                exit 0
+                echo -e "${GREEN}Selected: Luckpool Network${NC}"
+                pool_type="luckpool"
+                selected_pools=("${LUCKPOOL_POOLS[@]}")
+                break
                 ;;
             *)
-                echo -e "${RED}❌ Invalid option! Please select 1-4${NC}"
-                sleep 2
+                echo -e "${RED}Invalid selection! Please choose 1 or 2${NC}"
                 ;;
         esac
-        
-        echo -e "\n${YELLOW}Press Enter to continue...${NC}"
-        read
     done
+    
+    # Select specific pool
+    echo -e "\n${WHITE}Available ${pool_type^^} pools:${NC}"
+    for i in "${!selected_pools[@]}"; do
+        echo -e "  ${CYAN}$((i+1)). ${selected_pools[i]}${NC}"
+    done
+    
+    while true; do
+        read -p "$(echo -e ${YELLOW}"Select pool (1-${#selected_pools[@]}): "${NC})" pool_choice
+        if [[ $pool_choice =~ ^[0-9]+$ ]] && [ $pool_choice -ge 1 ] && [ $pool_choice -le ${#selected_pools[@]} ]; then
+            selected_pool="${selected_pools[$((pool_choice-1))]}"
+            echo -e "${GREEN}Selected pool: $selected_pool${NC}"
+            break
+        else
+            echo -e "${RED}Invalid selection! Please choose between 1-${#selected_pools[@]}${NC}"
+        fi
+    done
+    
+    # Get wallet address
+    while true; do
+        read -p "$(echo -e ${YELLOW}'Enter Wallet Address: '${NC})" wallet
+        if [ -n "$wallet" ]; then
+            break
+        else
+            echo -e "${RED}Wallet address cannot be empty!${NC}"
+        fi
+    done
+    
+    # Get worker name
+    while true; do
+        read -p "$(echo -e ${YELLOW}'Enter Worker Name: '${NC})" worker
+        if [ -n "$worker" ]; then
+            break
+        else
+            echo -e "${RED}Worker name cannot be empty!${NC}"
+        fi
+    done
+    
+    # Get CPU usage
+    while true; do
+        read -p "$(echo -e ${YELLOW}'Enter CPU Usage percentage (1-100): '${NC})" cpu_usage
+        if [[ $cpu_usage =~ ^[0-9]+$ ]] && [ $cpu_usage -ge 1 ] && [ $cpu_usage -le 100 ]; then
+            break
+        else
+            echo -e "${RED}Please enter a valid CPU usage between 1-100${NC}"
+        fi
+    done
+    
+    # Return values
+    POOL="$selected_pool"
+    WALLET="$wallet"
+    WORKER="$worker"
+    CPU_USAGE="$cpu_usage"
 }
 
-# Start the program
-main
+# Start mining
+start_mining() {
+    local pool=$1
+    local wallet=$2
+    local worker=$3
+    local cpu_usage=$4
+    
+    echo -e "\n${GREEN}Starting Mining Process...${NC}"
+    echo -e "${CYAN}Pool:${NC} $pool"
+    echo -e "${CYAN}Wallet:${NC} $wallet"
+    echo -e "${CYAN}Worker:${NC} $worker"
+    echo -e "${CYAN}CPU Usage:${NC} $cpu_usage%"
+    echo -e "${CYAN}Threads:${NC} $(nproc)"
+    
+    # Show progress bar
+    progress_bar 2
+    
+    # Create config file
+    create_config "$pool" "$wallet" "$worker" "$cpu_usage"
+    
+    echo -e "\n${GREEN}Launching ccminer...${NC}"
+    echo -e "${YELLOW}Press Ctrl+C to stop mining${NC}"
+    echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
+    
+    # Start ccminer with the configuration
+    "$CCMINER_PATH" -a verus -o stratum+tcp://$pool -u $wallet.$worker -p x -t $(( $(nproc) * cpu_usage / 100 ))
+}
+
+# Main function
+main() {
+    show_mining_header
+    show_animation
+    echo
+    
+    check_ccminer
+    show_pool_selection
+    
+    # Get user input
+    get_user_input
+    
+    # Confirm and start
+    echo -e "\n${YELLOW}Summary:${NC}"
+    echo -e "  Pool: $POOL"
+    echo -e "  Wallet: $WALLET"
+    echo -e "  Worker: $WORKER"
+    echo -e "  CPU Usage: $CPU_USAGE%"
+    
+    read -p "$(echo -e ${YELLOW}'Start mining? (y/n): '${NC})" confirm
+    if [[ $confirm =~ ^[Yy]$ ]]; then
+        start_mining "$POOL" "$WALLET" "$WORKER" "$CPU_USAGE"
+    else
+        echo -e "${RED}Mining cancelled.${NC}"
+        exit 0
+    fi
+}
+
+# Error handling
+set -e
+trap 'echo -e "${RED}Error occurred at line $LINENO${NC}"; exit 1' ERR
+
+# Run main function
+main "$@"
