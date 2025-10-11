@@ -25,7 +25,7 @@ apt install jq git bc libjansson4 -y
 ================================================
 Step3
 ```
-git clone https://github.com/BrokersMiner/VERUSV3_MinerPreCompile.git
+git clone https://github.com/BrokersMining/VERUSV3_MinerPreCompile.git
 ```
 ================================================
 Step4
