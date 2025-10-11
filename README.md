@@ -11,7 +11,7 @@ apt update && apt upgrade -y
 ```
 
 ```
-apt install proot-distro ubuntu
+apt install proot-distro
 ```
 
 ```
